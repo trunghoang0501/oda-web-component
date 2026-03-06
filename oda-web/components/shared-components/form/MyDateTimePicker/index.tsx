@@ -1,0 +1,506 @@
+import { CalendarTodayOutlined } from '@mui/icons-material';
+import { Box, IconButton, InputAdornment, useTheme } from '@mui/material';
+import TextField, { TextFieldProps } from '@mui/material/TextField';
+import { DateTimePicker } from '@mui/x-date-pickers';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import dayjs from 'dayjs';
+import { debounce } from 'debounce';
+import deepmerge from 'deepmerge';
+import { isPlainObject } from 'is-plain-object';
+import {
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useTranslation } from 'react-i18next';
+import useLocale from '@/hooks/useLocale';
+import useMobileDetect from '@/hooks/useMobileDetect';
+import { DatePickerInputValueType, MuiDatePickerProps } from '@/types';
+import {
+  DATE_FORMAT_YYYY_MM_DD_HH_MM,
+  dayOfWeekFormatter,
+  hexToRGBA,
+} from '@/utils';
+import { DEFAULT_MINUTE_STEP, TimeModeEnum } from './constants';
+import { IMyDateTimePickerProps } from './types';
+import { getHourList, getMinuteList } from './utils';
+
+/**
+ * You can use this component the same way with react-hook-form-mui
+ */
+export const MyDateTimePicker = (props: IMyDateTimePickerProps) => {
+  const theme = useTheme();
+  const { t } = useTranslation();
+  const {
+    minuteStep = DEFAULT_MINUTE_STEP,
+    datePickerProps = {},
+    textFieldProps = {},
+    value: propValue,
+    onChange,
+    removeEnable = false,
+  } = props;
+
+  const divWrapperRef = useRef<HTMLDivElement | null>(null);
+  const inputFormat =
+    datePickerProps?.inputFormat ?? DATE_FORMAT_YYYY_MM_DD_HH_MM;
+  const [openDatePicker, setOpenDatePicker] = useState(false);
+  const [hoursValue, setHourValue] = useState<number | undefined>(undefined);
+  const [minuteValue, setMinuteValue] = useState<number | undefined>(undefined);
+  const [timeMode, setTimeMode] = useState<TimeModeEnum | undefined>(undefined);
+  const [dateValue, setDateValue] =
+    useState<DatePickerInputValueType>(propValue);
+
+  const locale = useLocale();
+
+  const hourList = useMemo(() => {
+    return getHourList();
+  }, []);
+
+  const minuteList = useMemo(() => {
+    return getMinuteList(minuteStep);
+  }, [minuteStep]);
+
+  useEffect(() => {
+    const currentFieldDate = dayjs(
+      propValue?.toString ? propValue.toString() : undefined
+    );
+    const currentHour = Number(currentFieldDate.format('h'));
+    const currentMinute = currentFieldDate.minute();
+    const currentTimeMode = currentFieldDate.format('a') as TimeModeEnum;
+
+    if (propValue?.toString) {
+      setHourValue(currentHour);
+      setMinuteValue(currentMinute);
+      setTimeMode(currentTimeMode);
+      setDateValue(propValue);
+    } else {
+      setHourValue(undefined);
+      setMinuteValue(undefined);
+      setTimeMode(undefined);
+      setDateValue(propValue);
+    }
+  }, [propValue?.toString?.()]);
+
+  const changeHourValue = (value: number) => {
+    let newDateValue = dayjs(dateValue);
+
+    let newHourValue = value;
+    if (value === 12) {
+      if (timeMode === TimeModeEnum.AM) {
+        newHourValue = 0;
+      } else {
+        newHourValue = 12;
+      }
+    } else if (timeMode === TimeModeEnum.PM) {
+      newHourValue = newHourValue + 12;
+    }
+
+    newDateValue = newDateValue.set('hour', newHourValue);
+    setHourValue(value);
+    setDateValue(newDateValue);
+  };
+
+  const changeMinuteValue = (value: number) => {
+    let newDateValue = dayjs(dateValue);
+    newDateValue = newDateValue.set('minute', value);
+    setMinuteValue(value);
+    setDateValue(newDateValue);
+  };
+
+  const changeTimeMode = (value: TimeModeEnum) => {
+    let newDateValue = dayjs(dateValue);
+
+    // Ensure hoursValue is a number with a default of 1 if undefined
+    let newHourValue = typeof hoursValue === 'number' ? hoursValue : 1;
+    if (newHourValue === 12) {
+      if (value === TimeModeEnum.AM) {
+        newHourValue = 0;
+      } else {
+        newHourValue = 12;
+      }
+    } else if (value === TimeModeEnum.PM) {
+      newHourValue = newHourValue + 12;
+    }
+
+    newDateValue = newDateValue.set('hour', newHourValue);
+    setTimeMode(value);
+    setDateValue(newDateValue);
+  };
+
+  const handleOpen = () => {
+    if (datePickerProps?.disabled) {
+      return;
+    }
+    setOpenDatePicker(true);
+  };
+
+  /*
+    Fixing auto close popover when use touchpad macos change date
+  */
+  const handleDateChange = useCallback(
+    debounce((newValue: DatePickerInputValueType) => {
+      setDateValue(newValue);
+    }, 50),
+    [setDateValue]
+  );
+
+  const handleClose = () => {
+    setOpenDatePicker(false);
+    setDateValue(propValue);
+  };
+
+  const handleReset = () => {
+    setDateValue(null);
+    setHourValue(undefined);
+    setMinuteValue(undefined);
+    setTimeMode(undefined);
+    onChange(null);
+  };
+
+  const handleAccept = () => {
+    setOpenDatePicker(false);
+    onChange(dateValue);
+  };
+
+  const PaperContentCustom = useCallback(
+    (paperContentProps: { children: ReactNode }) => {
+      return (
+        <Box>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateAreas: `
+                'date time'
+                'action action'
+              `,
+              '& .MuiCalendarPicker-root': {
+                gridArea: 'date',
+
+                '.MuiPickersCalendarHeader-label': {
+                  textTransform: 'capitalize',
+                },
+              },
+            }}
+          >
+            {paperContentProps.children}
+
+            <Box
+              sx={{
+                gridArea: 'time',
+                p: theme.spacing(17.5, 6, 4, 6),
+                position: 'relative',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  left: 0,
+                  bottom: 0,
+                  top: theme.spacing(13.5),
+                  width: theme.spacing(0.25),
+                  background: `${hexToRGBA(theme.palette.common.black, 0.12)}`,
+                },
+              }}
+            >
+              <Box
+                sx={{
+                  display: 'flex',
+                  height: 248,
+                  overflow: 'hidden',
+                  fontSize: theme.spacing(3.5),
+                  lineHeight: theme.spacing(5),
+                  textAlign: 'center',
+                }}
+              >
+                {/* Select hour */}
+                <Box
+                  sx={{
+                    width: theme.spacing(15),
+                    overflow: 'auto',
+                    '&::-webkit-scrollbar': {
+                      display: 'none',
+                    },
+                  }}
+                >
+                  {hourList.map((item) => {
+                    return (
+                      <Box
+                        sx={{
+                          py: 2,
+                          cursor: 'pointer',
+                          borderRadius: theme.spacing(1),
+                          background:
+                            hoursValue === item
+                              ? theme.palette.primary.dark
+                              : undefined,
+                          color:
+                            hoursValue === item
+                              ? theme.palette.common.white
+                              : undefined,
+                        }}
+                        key={item}
+                        onClick={() => {
+                          changeHourValue(item);
+                        }}
+                      >
+                        {item.toString().padStart(2, '0')}
+                      </Box>
+                    );
+                  })}
+                </Box>
+
+                {/* Select minute */}
+                <Box
+                  sx={{
+                    width: theme.spacing(15),
+                    mx: 2,
+                    overflow: 'auto',
+                    '&::-webkit-scrollbar': {
+                      display: 'none',
+                    },
+                  }}
+                >
+                  {minuteList.map((item) => {
+                    return (
+                      <Box
+                        key={item}
+                        sx={{
+                          py: 2,
+                          cursor: 'pointer',
+                          borderRadius: theme.spacing(1),
+                          background:
+                            minuteValue === item
+                              ? theme.palette.primary.dark
+                              : undefined,
+                          color:
+                            minuteValue === item
+                              ? theme.palette.common.white
+                              : undefined,
+                        }}
+                        onClick={() => {
+                          changeMinuteValue(item);
+                        }}
+                      >
+                        {item.toString().padStart(2, '0')}
+                      </Box>
+                    );
+                  })}
+                </Box>
+
+                {/* Select time mode AM|PM */}
+                <Box
+                  sx={{
+                    width: theme.spacing(15),
+                    overflow: 'auto',
+                    '&::-webkit-scrollbar': {
+                      display: 'none',
+                    },
+                  }}
+                >
+                  {Object.values(TimeModeEnum).map((item) => {
+                    return (
+                      <Box
+                        key={item}
+                        sx={{
+                          py: 2,
+                          borderRadius: theme.spacing(1),
+                          cursor: 'pointer',
+                          background:
+                            timeMode === item
+                              ? theme.palette.primary.dark
+                              : undefined,
+                          color:
+                            timeMode === item
+                              ? theme.palette.common.white
+                              : undefined,
+                          textTransform: 'uppercase',
+                        }}
+                        onClick={() => {
+                          changeTimeMode(item);
+                        }}
+                      >
+                        {item}
+                      </Box>
+                    );
+                  })}
+                </Box>
+              </Box>
+            </Box>
+          </Box>
+        </Box>
+      );
+    },
+    [dateValue, timeMode, hoursValue, minuteValue]
+  );
+
+  const ActionBarCustom = useCallback(() => {
+    return (
+      <Box
+        sx={{
+          gridArea: 'action',
+          display: 'flex',
+          alignItems: 'center',
+          borderTop: `1px solid ${hexToRGBA(theme.palette.common.black, 0.12)}`,
+          p: 4,
+          mt: 4,
+        }}
+      >
+        <Box
+          sx={{
+            cursor: 'pointer',
+            px: 2,
+            py: 1.5,
+            color: theme.palette.error.dark,
+          }}
+          onClick={handleReset}
+        >
+          {t('reset')}
+        </Box>
+
+        <Box
+          sx={{
+            cursor: 'pointer',
+            ml: 'auto',
+            px: 2,
+            py: 1.5,
+            color: theme.palette.text.secondary,
+          }}
+          onClick={handleClose}
+        >
+          {t('cancel')}
+        </Box>
+
+        <Box
+          sx={{
+            cursor: 'pointer',
+            px: 2,
+            py: 1.5,
+            ml: 6,
+            color: theme.palette.info.main,
+          }}
+          onClick={handleAccept}
+        >
+          {t('question:ok')}
+        </Box>
+      </Box>
+    );
+  }, [handleReset, handleClose, handleAccept]);
+
+  const handleClearDate = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDateValue(null);
+    onChange(null);
+  };
+
+  const renderInput = useCallback<MuiDatePickerProps['renderInput']>(
+    (params) => {
+      const displayValue = params.inputProps?.value || '';
+
+      const arrTextFieldProps: TextFieldProps[] = [
+        params,
+        {
+          InputProps: {
+            endAdornment: (
+              <InputAdornment position="end">
+                {removeEnable && dateValue && (
+                  <IconButton
+                    edge="end"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDateValue(null);
+                      onChange(null);
+                    }}
+                    size="small"
+                  >
+                    <Box component="span" sx={{ fontSize: '1.25rem' }}>
+                      ×
+                    </Box>
+                  </IconButton>
+                )}
+                <IconButton edge="end" onClick={handleOpen}>
+                  <CalendarTodayOutlined />
+                </IconButton>
+              </InputAdornment>
+            ),
+          },
+          inputProps: {
+            value: displayValue,
+            readOnly: true,
+          },
+          fullWidth: true,
+          sx: {
+            '& .MuiIconButton-root': {
+              color: theme.palette.text.primary,
+            },
+          },
+          onClick: handleOpen,
+          onTouchStart: handleOpen,
+        },
+        textFieldProps,
+      ];
+
+      return (
+        <TextField
+          {...deepmerge.all(arrTextFieldProps, {
+            isMergeableObject: isPlainObject,
+          })}
+        />
+      );
+    },
+    [dateValue, propValue, textFieldProps, removeEnable, onChange]
+  );
+  const mobile = useMobileDetect();
+  const isMobile = mobile.isMobile();
+  return (
+    <LocalizationProvider adapterLocale={locale} dateAdapter={AdapterDayjs}>
+      {!isMobile && (
+        <DatePicker
+          ref={divWrapperRef}
+          value={dateValue}
+          open={openDatePicker}
+          inputFormat={inputFormat}
+          closeOnSelect={false}
+          onClose={handleClose}
+          onChange={handleDateChange}
+          components={{
+            OpenPickerIcon: CalendarTodayOutlined,
+            ...datePickerProps?.components,
+            PaperContent: PaperContentCustom,
+            ActionBar: ActionBarCustom,
+          }}
+          renderInput={renderInput}
+          dayOfWeekFormatter={(day) => dayOfWeekFormatter(day, locale)}
+          {...datePickerProps}
+        />
+      )}
+      {isMobile && (
+        <DateTimePicker
+          ref={divWrapperRef}
+          value={dateValue}
+          open={openDatePicker}
+          inputFormat={inputFormat}
+          closeOnSelect={false}
+          onClose={handleClose}
+          onChange={handleDateChange}
+          minDate={datePickerProps.minDate}
+          maxDate={datePickerProps.maxDate}
+          components={{
+            OpenPickerIcon: CalendarTodayOutlined,
+            ...datePickerProps?.components,
+            PaperContent: PaperContentCustom,
+            ActionBar: ActionBarCustom,
+          }}
+          renderInput={renderInput}
+          disabled={datePickerProps.disabled}
+          label={datePickerProps.label}
+          dayOfWeekFormatter={(day) => dayOfWeekFormatter(day, locale)}
+        />
+      )}
+    </LocalizationProvider>
+  );
+};
+
+export * from './types';
